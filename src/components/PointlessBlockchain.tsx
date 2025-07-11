@@ -4,24 +4,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useSolana } from '../lib/hooks/useSolana';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import Image from 'next/image';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, getDocs, orderBy, query, serverTimestamp, doc, getDoc, setDoc, increment, updateDoc, onSnapshot, limit } from 'firebase/firestore';
+import { collection, addDoc, getDocs, orderBy, query, serverTimestamp, doc, getDoc, setDoc, increment, updateDoc, onSnapshot, limit } from 'firebase/firestore';
+import app, { db } from '../lib/firebase/firebase';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-
-// Firebase config
-const firebaseConfig = {
-  apiKey: "AIzaSyB5a83r68LXLCwrn82tgYl8TlPoJCO7qhc",
-  authDomain: "pointlessblockchain.firebaseapp.com",
-  projectId: "pointlessblockchain",
-  storageBucket: "pointlessblockchain.firebasestorage.app",
-  messagingSenderId: "54354428082",
-  appId: "1:54354428082:web:2af3b887ac566b94c5c9ab"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
 
 function randomHash() {
   const chars = 'abcdef0123456789';
@@ -80,13 +66,15 @@ export default function PointlessBlockchain() {
   const [sessionStartTime, setSessionStartTime] = useState<number>(Date.now());
   const [isChatMode, setIsChatMode] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isMobile, setIsMobile] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const blocksPerPage = 25;
+  const blocksPerPage = 35;
   const totalPages = Math.ceil(blocks.length / blocksPerPage);
   const startIndex = (currentPage - 1) * blocksPerPage;
   const endIndex = startIndex + blocksPerPage;
-  const currentBlocks = blocks.slice(startIndex, endIndex);
+  // Show all blocks on mobile, paginated on desktop
+  const currentBlocks = isMobile ? blocks : blocks.slice(startIndex, endIndex);
 
   // Focus input on mount
   useEffect(() => {
@@ -106,6 +94,18 @@ export default function PointlessBlockchain() {
       '  clear             - Clear terminal output',
       ''
     ]);
+  }, []);
+
+  // Detect mobile screen size
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
   // Update time wasted every 10 seconds
@@ -251,28 +251,16 @@ export default function PointlessBlockchain() {
     } else if (trimmed === 'pointless-stats') {
       output = [
         'POINTLESS BLOCKCHAIN STATISTICS',
-        '==============================',
-        `Total Empty Blocks: ${blocks.length}`,
-        `Button Presses:     ${totalClicks}`,
-        `Time Wasted:        ${totalTimeWasted} s`,
-        `Hashrate:           ${hashrate} H/s`,
+        '================================',
+        `Total Blocks: ${blocks.length}`,
+        `Total Time Wasted: ${Math.floor(totalTimeWasted / 60)} minutes`,
+        `Current Hashrate: ${hashrate}`,
+        `Connected Wallet: ${publicKey ? 'Yes' : 'No'}`,
         ''
       ];
     } else if (trimmed === 'chat') {
-      if (!publicKey) {
-        output = ['Please connect a wallet first using "connect-wallet".'];
-      } else {
-        output = [
-          'Entering chatroom...',
-          'Type "send <message>" to send a message.',
-          'Type "back" or "exit" to return to terminal.',
-          ''
-        ];
-        // Add delay before entering chat mode
-        setTimeout(() => {
-          setIsChatMode(true);
-        }, 2000); // 2 second delay
-      }
+      setIsChatMode(true);
+      output = ['Entering pointless chatroom...', ''];
     } else if (trimmed === 'clear') {
       setTerminalLines([]);
       return;
@@ -280,27 +268,33 @@ export default function PointlessBlockchain() {
       output = [`Command not found: ${trimmed}. Type "help" for available commands.`];
     }
    }
-    
-    setTerminalLines(prev => [...prev, `$ ${trimmed}`, ...output]);
+   
+   if (output.length > 0) {
+     setTerminalLines(prev => [...prev, ...output]);
+   }
   }
 
-  // Send chat message
+  // Handle send button click
+  const handleSend = () => {
+    handleCommand(command);
+    setCommand('');
+  };
+
   async function sendMessage(message: string) {
     if (!publicKey) return;
     
     try {
-      const username = `${publicKey.toString().slice(0, 4)}...${publicKey.toString().slice(-4)}`;
-      const chatMessage: ChatMessage = {
+      const username = `User${publicKey.toString().slice(0, 4)}`;
+      const messageData = {
         wallet: publicKey.toString(),
         username: username,
         message: message,
-        timestamp: getNow()
+        timestamp: serverTimestamp()
       };
       
-      await addDoc(collection(db, 'messages'), chatMessage);
+      await addDoc(collection(db, 'messages'), messageData);
     } catch (error) {
       console.error('Error sending message:', error);
-      setTerminalLines(prev => [...prev, 'Error: Failed to send message.', '']);
     }
   }
 
@@ -405,27 +399,27 @@ export default function PointlessBlockchain() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-black text-green-400 font-mono text-base flex flex-col">
+    <div className="min-h-screen w-full bg-black text-green-400 font-mono text-sm md:text-base flex flex-col px-2 md:px-4">
       {/* Terminal UI */}
-      <div className="w-full max-w-3xl mx-auto mt-8 mb-4 bg-black text-green-400 font-mono text-base rounded shadow-lg border border-green-800 p-4">
+      <div className="w-full max-w-4xl mx-auto mt-4 md:mt-8 mb-4 bg-black text-green-400 font-mono text-sm md:text-base rounded shadow-lg border border-green-800 p-2 md:p-4">
         {/* Terminal Header Prompt */}
         <div className="flex items-center mb-2">
-          <span className="text-green-500">user@pointlessblockchain:~$</span>
-          <span className="ml-2 text-green-200 font-bold">POINTLESS BLOCKCHAIN</span>
+          <span className="text-green-500 text-xs md:text-sm">user@pointlessblockchain:~$</span>
+          <span className="ml-2 text-green-200 font-bold text-xs md:text-sm">POINTLESS BLOCKCHAIN</span>
         </div>
         {/* Terminal Output (stats and command output) */}
-        <div className="min-h-[120px] whitespace-pre-wrap text-green-200 text-sm mb-2">
+        <div className="min-h-[100px] md:min-h-[120px] whitespace-pre-wrap text-green-200 text-xs md:text-sm mb-2 overflow-y-auto max-h-[200px] md:max-h-[300px]">
           {isChatMode ? (
             <div className="space-y-1">
-              <div className="text-green-400 font-bold mb-2">[POINTLESS CHATROOM]</div>
+              <div className="text-green-400 font-bold mb-2 text-xs md:text-sm">[POINTLESS CHATROOM]</div>
               <div className="text-green-300 text-xs mb-3 border-b border-green-700 pb-2">
                 Commands: send &lt;message&gt; | back | exit | help
               </div>
               {messages.length === 0 ? (
-                <div className="text-green-300">No messages yet. Be the first to say something pointless!</div>
+                <div className="text-green-300 text-xs md:text-sm">No messages yet. Be the first to say something pointless!</div>
               ) : (
                 messages.map((msg, i) => (
-                  <div key={msg.id || i} className="text-green-200">
+                  <div key={msg.id || i} className="text-green-200 text-xs md:text-sm">
                     <span className="text-green-400">[{msg.timestamp}]</span>
                     <span className="text-green-300 font-bold"> {msg.username}:</span>
                     <span className="text-green-200"> {msg.message}</span>
@@ -435,22 +429,30 @@ export default function PointlessBlockchain() {
             </div>
           ) : (
             terminalLines.map((line, i) => (
-              <div key={i}>{line}</div>
+              <div key={i} className="text-xs md:text-sm">{line}</div>
             ))
           )}
         </div>
-        {/* Command Input */}
-        <div className="flex items-center bg-black px-3 py-2 rounded-none">
-          <span className="text-green-300 font-bold mr-2">
+        {/* Command Input with Send Button */}
+        <div className="flex items-center bg-black px-2 md:px-3 py-2 rounded-none gap-2">
+          <span className="text-green-300 font-bold mr-2 text-xs md:text-sm flex-shrink-0">
             {publicKey ? `pointlessuser@${publicKey.toString().slice(0, 4)}...${publicKey.toString().slice(-4)}` : 'pointlessuser'}$
           </span>
           <div 
-            className="flex-1 bg-transparent text-green-400 font-mono outline-none cursor-text"
+            className="flex-1 bg-transparent text-green-400 font-mono outline-none cursor-text text-xs md:text-sm"
             onClick={() => inputRef.current?.focus()}
           >
             <span className="text-green-400">{command}</span>
             <span className="text-green-300 animate-pulse">_</span>
           </div>
+          {/* Send Button for Mobile */}
+          <button
+            onClick={handleSend}
+            disabled={!command.trim()}
+            className="bg-green-900 text-green-200 px-3 py-1 border border-green-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-800 text-xs md:text-sm rounded flex-shrink-0"
+          >
+            Send
+          </button>
         </div>
         <input
           ref={inputRef}
@@ -472,8 +474,8 @@ export default function PointlessBlockchain() {
       </div>
 
       {/* Blockchain Explorer Table (always below terminal) */}
-      <div className="w-full max-w-3xl mx-auto">
-        <pre className="text-green-200 whitespace-pre overflow-x-auto text-xs md:text-sm">
+      <div className="w-full max-w-4xl mx-auto">
+        <pre className="text-green-200 whitespace-pre overflow-x-auto text-xs">
 {`[BLOCKCHAIN EXPLORER]
 ${blocks.length === 0 ? '  No blocks yet. Connect wallet and add the first empty block.' :
   '  BLOCK# HASH                 PREV_HASH            TIMESTAMP              WALLET           '
@@ -487,17 +489,17 @@ ${currentBlocks.map(block =>
 ).join('\n')}
 `}
         </pre>
-        {/* Pagination Controls */}
+        {/* Pagination Controls - Desktop Only */}
         {blocks.length > 0 && (
-          <div className="flex items-center justify-between mt-4 text-green-200 text-sm">
-            <div>
+          <div className="hidden md:flex flex-row items-center justify-between mt-4 text-green-200 text-sm gap-2">
+            <div className="text-left">
               Showing blocks {startIndex + 1}-{Math.min(endIndex, blocks.length)} of {blocks.length}
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                 disabled={currentPage === 1}
-                className="bg-green-900 text-green-200 px-3 py-1 border border-green-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-800"
+                className="bg-green-900 text-green-200 px-3 py-1 border border-green-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-800 rounded"
               >
                 ← Previous
               </button>
@@ -507,13 +509,48 @@ ${currentBlocks.map(block =>
               <button
                 onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                 disabled={currentPage === totalPages}
-                className="bg-green-900 text-green-200 px-3 py-1 border border-green-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-800"
+                className="bg-green-900 text-green-200 px-3 py-1 border border-green-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-800 rounded"
               >
                 Next →
               </button>
             </div>
           </div>
         )}
+        
+        {/* Mobile Block Count */}
+        {blocks.length > 0 && (
+          <div className="md:hidden text-center mt-4 text-green-200 text-xs">
+            Showing all {blocks.length} blocks
+          </div>
+        )}
+
+        {/* Social/Community Buttons */}
+        <div className="flex flex-col sm:flex-row gap-3 mt-8 items-center justify-center">
+          <a
+            href="https://x.com/pointlesschain"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-green-900 hover:bg-green-800 text-green-200 border border-green-600 px-6 py-2 rounded font-mono text-xs md:text-sm transition-colors shadow"
+          >
+            Twitter @pointlesschain
+          </a>
+          <a
+            href="https://x.com/i/communities/1943440306277634548"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-green-900 hover:bg-green-800 text-green-200 border border-green-600 px-6 py-2 rounded font-mono text-xs md:text-sm transition-colors shadow"
+          >
+            Twitter Community
+          </a>
+          <a
+            href="https://dexscreener.com/solana/enj7cgnkltr9uxxasfkefxvjpepgtfoo85vqbrrysxnq"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-green-900 hover:bg-green-800 text-green-200 border border-green-600 px-6 py-2 rounded font-mono text-xs md:text-sm transition-colors shadow"
+          >
+            DexScreener
+          </a>
+        </div>
       </div>
 
       {/* Terminal Footer */}

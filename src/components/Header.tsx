@@ -22,9 +22,9 @@ export default function Header() {
         </div>
         
         {/* Navigation/Status */}
-        <div className="text-green-400 text-sm font-mono">
-          <div className="text-green-600">Status: Online</div>
-          <div className="text-green-500">Network: PointlessNet</div>
+        <div className="text-green-400 text-xs md:text-sm font-mono">
+          <div className="text-green-600 text-xs md:text-sm">Status: Online</div>
+          <div className="text-green-500 text-xs md:text-sm">Network: PointlessNet</div>
         </div>
       </div>
     </header>
